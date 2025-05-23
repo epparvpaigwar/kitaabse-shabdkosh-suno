@@ -1,3 +1,4 @@
+
 import type { Config } from "tailwindcss";
 
 export default {
@@ -52,16 +53,41 @@ export default {
 					DEFAULT: 'hsl(var(--card))',
 					foreground: 'hsl(var(--card-foreground))'
 				},
-				sidebar: {
-					DEFAULT: 'hsl(var(--sidebar-background))',
-					foreground: 'hsl(var(--sidebar-foreground))',
-					primary: 'hsl(var(--sidebar-primary))',
-					'primary-foreground': 'hsl(var(--sidebar-primary-foreground))',
-					accent: 'hsl(var(--sidebar-accent))',
-					'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
-					border: 'hsl(var(--sidebar-border))',
-					ring: 'hsl(var(--sidebar-ring))'
+				// Vintage Hindi theme colors
+				sandalwood: {
+					50: '#fefbf4',
+					100: '#fdf6e8',
+					200: '#fbecc5',
+					300: '#f7dda2',
+					400: '#f0c15c',
+					500: '#e8a416',
+					600: '#d19414',
+					700: '#ae7b11',
+					800: '#8b620e',
+					900: '#72500b'
+				},
+				maroon: {
+					50: '#fdf2f2',
+					100: '#fce4e4',
+					200: '#f7cdcd',
+					300: '#f1a6a6',
+					400: '#e67777',
+					500: '#d94c4c',
+					600: '#c63131',
+					700: '#a62626',
+					800: '#892323',
+					900: '#722323'
+				},
+				vintage: {
+					cream: '#f7f3e9',
+					brown: '#8b4513',
+					gold: '#b8860b',
+					parchment: '#f4f1e8'
 				}
+			},
+			fontFamily: {
+				'hindi': ['Noto Sans Devanagari', 'system-ui', 'sans-serif'],
+				'english': ['Inter', 'system-ui', 'sans-serif'],
 			},
 			borderRadius: {
 				lg: 'var(--radius)',
@@ -84,11 +110,22 @@ export default {
 					to: {
 						height: '0'
 					}
+				},
+				'fade-in': {
+					'0%': {
+						opacity: '0',
+						transform: 'translateY(10px)'
+					},
+					'100%': {
+						opacity: '1',
+						transform: 'translateY(0)'
+					}
 				}
 			},
 			animation: {
 				'accordion-down': 'accordion-down 0.2s ease-out',
-				'accordion-up': 'accordion-up 0.2s ease-out'
+				'accordion-up': 'accordion-up 0.2s ease-out',
+				'fade-in': 'fade-in 0.5s ease-out'
 			}
 		}
 	},
