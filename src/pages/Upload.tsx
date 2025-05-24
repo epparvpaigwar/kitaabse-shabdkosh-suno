@@ -14,7 +14,7 @@ import { Loader2, Upload, Image } from "lucide-react";
 import Navbar from "@/components/Navbar";
 
 const UploadPage = () => {
-  const { user, isVerified } = useAuth();
+  const { user, isVerified, userRole } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
@@ -27,6 +27,14 @@ const UploadPage = () => {
     pdf: null as File | null,
     cover: null as File | null,
   });
+
+  const sanitizeFileName = (fileName: string): string => {
+    // Remove special characters and spaces, keep only alphanumeric, dots, and hyphens
+    return fileName
+      .replace(/[^a-zA-Z0-9.-]/g, '_')
+      .replace(/_{2,}/g, '_')
+      .replace(/^_+|_+$/g, '');
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'pdf' | 'cover') => {
     if (!e.target.files || e.target.files.length === 0) return;
@@ -117,7 +125,7 @@ const UploadPage = () => {
       return;
     }
 
-    if (!isVerified) {
+    if (!isVerified && userRole !== 'superadmin') {
       toast({
         title: "Email verification required",
         description: "Please verify your email before uploading books",
@@ -138,6 +146,8 @@ const UploadPage = () => {
     setLoading(true);
     
     try {
+      console.log('Starting upload process for user:', user.id);
+      
       // 1. Insert book metadata into database
       const { data: bookData, error: bookError } = await supabase
         .from("books")
@@ -152,50 +162,84 @@ const UploadPage = () => {
         .select()
         .single();
       
-      if (bookError) throw new Error(bookError.message);
+      if (bookError) {
+        console.error('Book insertion error:', bookError);
+        throw new Error(bookError.message);
+      }
       
+      console.log('Book created with ID:', bookData.id);
       const bookId = bookData.id;
       let coverUrl = null;
 
       // 2. Upload cover image if provided
       if (bookForm.cover) {
-        const coverPath = `${user.id}/${bookId}/cover.${bookForm.cover.name.split('.').pop()}`;
+        console.log('Uploading cover image...');
+        const coverFileExtension = bookForm.cover.name.split('.').pop() || 'jpg';
+        const sanitizedCoverName = sanitizeFileName(`cover_${Date.now()}.${coverFileExtension}`);
+        const coverPath = `${user.id}/${bookId}/${sanitizedCoverName}`;
+        
+        console.log('Cover upload path:', coverPath);
         
         const { error: coverUploadError } = await supabase.storage
           .from("book-covers")
-          .upload(coverPath, bookForm.cover);
+          .upload(coverPath, bookForm.cover, {
+            cacheControl: '3600',
+            upsert: false
+          });
         
         if (coverUploadError) {
-          console.warn("Cover upload failed:", coverUploadError.message);
+          console.warn("Cover upload failed:", coverUploadError);
         } else {
           const { data: coverUrlData } = supabase.storage
             .from("book-covers")
             .getPublicUrl(coverPath);
           
           coverUrl = coverUrlData.publicUrl;
+          console.log('Cover uploaded successfully:', coverUrl);
         }
       }
 
       // 3. Upload PDF to storage
-      const filePath = `${user.id}/${bookId}/${bookForm.pdf.name}`;
+      console.log('Uploading PDF...');
+      const pdfFileExtension = bookForm.pdf.name.split('.').pop() || 'pdf';
+      const sanitizedPdfName = sanitizeFileName(`${bookForm.title}_${Date.now()}.${pdfFileExtension}`);
+      const filePath = `${user.id}/${bookId}/${sanitizedPdfName}`;
+      
+      console.log('PDF upload path:', filePath);
+      console.log('PDF file size:', bookForm.pdf.size);
+      console.log('PDF file type:', bookForm.pdf.type);
       
       const { error: uploadError } = await supabase.storage
         .from("books")
-        .upload(filePath, bookForm.pdf);
+        .upload(filePath, bookForm.pdf, {
+          cacheControl: '3600',
+          upsert: false
+        });
       
-      if (uploadError) throw new Error(uploadError.message);
+      if (uploadError) {
+        console.error('PDF upload error:', uploadError);
+        throw new Error(`PDF upload failed: ${uploadError.message}`);
+      }
+      
+      console.log('PDF uploaded successfully');
       
       // 4. Get public URL for the PDF
       const { data: urlData } = supabase.storage
         .from("books")
         .getPublicUrl(filePath);
 
+      console.log('PDF public URL:', urlData.publicUrl);
+
       // 5. Update book with cover URL if uploaded
       if (coverUrl) {
-        await supabase
+        const { error: updateError } = await supabase
           .from("books")
           .update({ cover_url: coverUrl })
           .eq("id", bookId);
+        
+        if (updateError) {
+          console.warn('Failed to update cover URL:', updateError);
+        }
       }
       
       // 6. Create first pending chunk
@@ -207,10 +251,16 @@ const UploadPage = () => {
           status: "pending",
         });
       
-      if (chunkError) throw new Error(chunkError.message);
+      if (chunkError) {
+        console.error('Chunk creation error:', chunkError);
+        throw new Error(chunkError.message);
+      }
+      
+      console.log('First chunk created successfully');
       
       // 7. Trigger the OCR and audio generation process
       try {
+        console.log('Starting book processing...');
         const processRes = await fetch("/api/process-book", {
           method: "POST",
           headers: {
@@ -224,8 +274,11 @@ const UploadPage = () => {
         
         if (!processRes.ok) {
           const errorData = await processRes.json();
+          console.warn('Book processing failed:', errorData);
           throw new Error(errorData.error || "Failed to process book");
         }
+        
+        console.log('Book processing started successfully');
       } catch (processError) {
         console.warn("Book processing failed:", processError);
         toast({
@@ -241,8 +294,26 @@ const UploadPage = () => {
         description: "Your book has been uploaded and is now being processed.",
       });
       
+      // Reset form
+      setBookForm({
+        title: "",
+        author: "",
+        language: "hindi",
+        description: "",
+        isPublic: true,
+        pdf: null,
+        cover: null,
+      });
+      
+      // Reset file inputs
+      const pdfInput = document.getElementById('pdf') as HTMLInputElement;
+      const coverInput = document.getElementById('cover') as HTMLInputElement;
+      if (pdfInput) pdfInput.value = '';
+      if (coverInput) coverInput.value = '';
+      
       navigate("/library");
     } catch (error) {
+      console.error('Upload error:', error);
       toast({
         title: "Upload failed",
         description: error instanceof Error ? error.message : "An unknown error occurred",
@@ -265,7 +336,7 @@ const UploadPage = () => {
     );
   }
 
-  if (!isVerified) {
+  if (!isVerified && userRole !== 'superadmin') {
     return (
       <div className="min-h-screen bg-gray-50">
         <Navbar />
@@ -382,7 +453,16 @@ const UploadPage = () => {
                     onChange={(e) => handleFileChange(e, 'pdf')}
                     required
                   />
+                  <p className="text-sm text-muted-foreground">
+                    PDF files only, maximum 10 MB
+                  </p>
                 </div>
+                {bookForm.pdf && (
+                  <div className="flex items-center gap-2 text-sm text-green-600">
+                    <Upload className="h-4 w-4" />
+                    {bookForm.pdf.name}
+                  </div>
+                )}
               </div>
             </CardContent>
             
