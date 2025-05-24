@@ -49,7 +49,7 @@ INSTALLED_APPS = [
 
     # Your app
     'audiobooks',
-    'users'
+    'users',
     'rest_framework_simplejwt',
 ]
 
