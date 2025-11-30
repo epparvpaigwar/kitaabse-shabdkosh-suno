@@ -1,7 +1,6 @@
 
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { uploadBook } from "@/services/bookService";
 import { uploadBookWithSSE, UploadProgress } from "@/services/sseUpload";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/components/ui/use-toast";
@@ -10,7 +9,7 @@ import { BookFormFields } from "./BookFormFields";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Loader2, Upload, CheckCircle2 } from "lucide-react";
+import { Loader2, Upload, CheckCircle2, FileText, Volume2, AlertCircle } from "lucide-react";
 
 export const BookForm = () => {
   const { user } = useAuth();
@@ -149,36 +148,116 @@ export const BookForm = () => {
 
           {/* Upload Progress Display */}
           {uploadProgress && (
-            <div className="space-y-3 p-4 bg-amber-50 border border-amber-200 rounded-lg">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
+            <div className={`space-y-4 p-4 rounded-lg border ${
+              uploadProgress.status === 'completed'
+                ? 'bg-green-50 border-green-200'
+                : uploadProgress.status === 'error'
+                ? 'bg-red-50 border-red-200'
+                : 'bg-amber-50 border-amber-200'
+            }`}>
+              {/* Stage Indicator */}
+              <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-full ${
+                  uploadProgress.status === 'completed'
+                    ? 'bg-green-100'
+                    : uploadProgress.status === 'error'
+                    ? 'bg-red-100'
+                    : uploadProgress.status === 'extracting_text'
+                    ? 'bg-blue-100'
+                    : uploadProgress.status === 'generating_audio'
+                    ? 'bg-purple-100'
+                    : 'bg-amber-100'
+                }`}>
                   {uploadProgress.status === 'completed' ? (
                     <CheckCircle2 className="h-5 w-5 text-green-600" />
+                  ) : uploadProgress.status === 'error' ? (
+                    <AlertCircle className="h-5 w-5 text-red-600" />
+                  ) : uploadProgress.status === 'extracting_text' ? (
+                    <FileText className="h-5 w-5 text-blue-600 animate-pulse" />
+                  ) : uploadProgress.status === 'generating_audio' ? (
+                    <Volume2 className="h-5 w-5 text-purple-600 animate-pulse" />
                   ) : (
                     <Loader2 className="h-5 w-5 animate-spin text-amber-600" />
                   )}
-                  <span className="font-medium text-sm text-gray-900">
-                    {uploadProgress.message}
-                  </span>
                 </div>
-                {uploadProgress.totalPages > 0 && (
-                  <span className="text-sm text-gray-600">
-                    {uploadProgress.currentPage}/{uploadProgress.totalPages} pages
-                  </span>
-                )}
+                <div className="flex-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-sm text-gray-900">
+                      {uploadProgress.stage?.name || 'Processing'}
+                    </span>
+                    {uploadProgress.totalPages > 0 && (
+                      <span className="text-sm font-medium text-gray-600">
+                        {uploadProgress.stage?.detail}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-600 mt-0.5">
+                    {uploadProgress.message}
+                  </p>
+                </div>
               </div>
 
-              {uploadProgress.totalPages > 0 && (
-                <div className="space-y-1">
-                  <Progress value={uploadProgress.progress} className="h-2" />
-                  <div className="flex justify-between text-xs text-gray-600">
-                    <span>
-                      {uploadProgress.status === 'processing' && 'Extraction Processing'}
-                      {uploadProgress.status === 'audio_generation' && 'Generating Audio'}
-                      {uploadProgress.status === 'completed' && 'Completed'}
-                    </span>
-                    <span>{uploadProgress.progress}%</span>
+              {/* Progress Bar */}
+              <div className="space-y-2">
+                <Progress
+                  value={uploadProgress.progress}
+                  className={`h-2 ${
+                    uploadProgress.status === 'completed' ? '[&>div]:bg-green-500' :
+                    uploadProgress.status === 'error' ? '[&>div]:bg-red-500' :
+                    uploadProgress.status === 'extracting_text' ? '[&>div]:bg-blue-500' :
+                    uploadProgress.status === 'generating_audio' ? '[&>div]:bg-purple-500' :
+                    ''
+                  }`}
+                />
+                <div className="flex justify-between text-xs text-gray-500">
+                  <span>
+                    {uploadProgress.status === 'uploading' && 'Preparing upload...'}
+                    {uploadProgress.status === 'extracting_text' && 'Extracting text from PDF...'}
+                    {uploadProgress.status === 'generating_audio' && 'Converting text to speech...'}
+                    {uploadProgress.status === 'completed' && 'All done!'}
+                    {uploadProgress.status === 'error' && 'Upload failed'}
+                  </span>
+                  <span className="font-medium">{uploadProgress.progress}%</span>
+                </div>
+              </div>
+
+              {/* Audio Stats (shown during audio generation) */}
+              {uploadProgress.audioStats && uploadProgress.status === 'generating_audio' && (
+                <div className="flex gap-4 text-xs pt-2 border-t border-amber-200">
+                  <div className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                    <span className="text-gray-600">Generated: {uploadProgress.audioStats.generated}</span>
                   </div>
+                  {uploadProgress.audioStats.skipped > 0 && (
+                    <div className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-yellow-500"></span>
+                      <span className="text-gray-600">Skipped: {uploadProgress.audioStats.skipped}</span>
+                    </div>
+                  )}
+                  {uploadProgress.audioStats.failed > 0 && (
+                    <div className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                      <span className="text-gray-600">Failed: {uploadProgress.audioStats.failed}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Completion Stats */}
+              {uploadProgress.status === 'completed' && uploadProgress.audioStats && (
+                <div className="flex flex-wrap gap-3 text-xs pt-2 border-t border-green-200">
+                  <div className="flex items-center gap-1.5 bg-green-100 px-2 py-1 rounded-full">
+                    <CheckCircle2 className="h-3 w-3 text-green-600" />
+                    <span className="text-green-700 font-medium">{uploadProgress.audioStats.generated} audio files</span>
+                  </div>
+                  {uploadProgress.audioStats.currentDuration && uploadProgress.audioStats.currentDuration > 0 && (
+                    <div className="flex items-center gap-1.5 bg-purple-100 px-2 py-1 rounded-full">
+                      <Volume2 className="h-3 w-3 text-purple-600" />
+                      <span className="text-purple-700 font-medium">
+                        {Math.floor(uploadProgress.audioStats.currentDuration / 60)}m {Math.round(uploadProgress.audioStats.currentDuration % 60)}s total
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -189,8 +268,17 @@ export const BookForm = () => {
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                {uploadProgress?.status === 'completed' ? 'Completed!' : 'Processing...'}
+                {uploadProgress?.status === 'completed' ? (
+                  <CheckCircle2 className="mr-2 h-4 w-4 text-green-500" />
+                ) : (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                {uploadProgress?.status === 'uploading' && 'Uploading...'}
+                {uploadProgress?.status === 'extracting_text' && `Extracting Text (${uploadProgress.progress}%)`}
+                {uploadProgress?.status === 'generating_audio' && `Generating Audio (${uploadProgress.progress}%)`}
+                {uploadProgress?.status === 'completed' && 'Completed! Redirecting...'}
+                {uploadProgress?.status === 'error' && 'Upload Failed'}
+                {!uploadProgress?.status && 'Processing...'}
               </>
             ) : (
               <>

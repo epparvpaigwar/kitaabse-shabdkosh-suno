@@ -1,16 +1,40 @@
 import { UploadBookRequest } from './bookService';
+import { BASE_URL } from './api';
 
+// SSE Event types matching new backend
 export interface SSEEvent {
-  type: 'status' | 'processing_started' | 'page_progress' | 'audio_generation_started' | 'completed' | 'error';
+  type: 'status' | 'processing_started' | 'text_progress' | 'audio_started' | 'audio_progress' | 'completed' | 'error';
   data: any;
 }
+
+// Upload stages for better UX
+export type UploadStage =
+  | 'idle'
+  | 'uploading'           // Initial upload
+  | 'extracting_text'     // OCR/text extraction in progress
+  | 'generating_audio'    // Audio generation in progress
+  | 'completed'
+  | 'error';
 
 export interface UploadProgress {
   currentPage: number;
   totalPages: number;
-  progress: number;
-  message: string;
-  status: 'idle' | 'uploading' | 'processing' | 'audio_generation' | 'completed' | 'error';
+  progress: number;           // Overall progress (0-100)
+  message: string;            // Current status message
+  status: UploadStage;
+  // Detailed stage info
+  stage?: {
+    name: string;             // Human readable stage name
+    detail?: string;          // Additional detail (e.g., "Page 3/10")
+    subProgress?: number;     // Progress within current stage
+  };
+  // Audio generation specific
+  audioStats?: {
+    generated: number;
+    failed: number;
+    skipped: number;
+    currentDuration?: number;
+  };
 }
 
 export interface SSEUploadCallbacks {
@@ -42,7 +66,7 @@ export const uploadBookWithSSE = async (
 
   try {
     // Use query parameter ?stream=true instead of Accept header
-    const response = await fetch('https://kiaatbse-backend.onrender.com/api/books/upload/?stream=true', {
+    const response = await fetch(`${BASE_URL}/api/audiobooks/upload/`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -121,64 +145,159 @@ function parseSSEEvent(eventText: string): SSEEvent {
   };
 }
 
+// Track audio stats across events
+let audioStats = { generated: 0, failed: 0, skipped: 0, totalDuration: 0 };
+
 /**
- * Handle different SSE event types
+ * Handle different SSE event types from new backend
  */
 function handleSSEEvent(event: SSEEvent, callbacks: SSEUploadCallbacks): void {
   switch (event.type) {
     case 'status':
+      // General status messages (e.g., "Starting upload process...", "Creating book record...")
       callbacks.onProgress?.({
         currentPage: 0,
         totalPages: 0,
-        progress: 0,
+        progress: 5,
         message: event.data.message,
         status: 'uploading',
+        stage: {
+          name: 'Preparing',
+          detail: event.data.message,
+        },
       });
       break;
 
     case 'processing_started':
+      // Text extraction started - reset audio stats
+      audioStats = { generated: 0, failed: 0, skipped: 0, totalDuration: 0 };
       callbacks.onProgress?.({
         currentPage: 0,
         totalPages: event.data.total_pages,
-        progress: 0,
-        message: event.data.message || `Processing ${event.data.total_pages} pages with OCR`,
-        status: 'processing',
+        progress: 10,
+        message: event.data.message || `Extracting text from ${event.data.total_pages} pages...`,
+        status: 'extracting_text',
+        stage: {
+          name: 'Text Extraction',
+          detail: `0/${event.data.total_pages} pages`,
+          subProgress: 0,
+        },
       });
       break;
 
-    case 'page_progress':
+    case 'text_progress':
+      // Individual page text extraction progress
+      const textProgress = Math.round((event.data.current_page / event.data.total_pages) * 40) + 10; // 10-50%
       callbacks.onProgress?.({
         currentPage: event.data.current_page,
         totalPages: event.data.total_pages,
-        progress: event.data.progress,
-        message: event.data.message || `Processing page ${event.data.current_page} of ${event.data.total_pages}`,
-        status: 'processing',
+        progress: textProgress,
+        message: event.data.message || `Extracting text: page ${event.data.current_page} of ${event.data.total_pages}`,
+        status: 'extracting_text',
+        stage: {
+          name: 'Text Extraction',
+          detail: `${event.data.current_page}/${event.data.total_pages} pages`,
+          subProgress: Math.round((event.data.current_page / event.data.total_pages) * 100),
+        },
       });
       break;
 
-    case 'audio_generation_started':
+    case 'audio_started':
+      // Audio generation started (after text extraction complete)
       callbacks.onProgress?.({
         currentPage: 0,
         totalPages: event.data.total_pages,
-        progress: 100, // OCR is done
-        message: event.data.message || 'Starting audio generation...',
-        status: 'audio_generation',
+        progress: 50,
+        message: event.data.message || `Generating audio for ${event.data.total_pages} pages...`,
+        status: 'generating_audio',
+        stage: {
+          name: 'Audio Generation',
+          detail: `0/${event.data.total_pages} pages`,
+          subProgress: 0,
+        },
+        audioStats: { ...audioStats },
+      });
+      break;
+
+    case 'audio_progress':
+      // Individual page audio generation progress
+      const pageStatus = event.data.status; // 'generating', 'completed', 'skipped', 'failed'
+
+      // Update stats based on status
+      if (pageStatus === 'completed') {
+        audioStats.generated++;
+        audioStats.totalDuration += event.data.duration || 0;
+      } else if (pageStatus === 'skipped') {
+        audioStats.skipped++;
+      } else if (pageStatus === 'failed') {
+        audioStats.failed++;
+      }
+
+      const audioProgress = Math.round((event.data.current_page / event.data.total_pages) * 50) + 50; // 50-100%
+      const statusEmoji = pageStatus === 'generating' ? '⏳' :
+                          pageStatus === 'completed' ? '✓' :
+                          pageStatus === 'skipped' ? '⏭' : '✗';
+
+      callbacks.onProgress?.({
+        currentPage: event.data.current_page,
+        totalPages: event.data.total_pages,
+        progress: audioProgress,
+        message: event.data.message || `${statusEmoji} Audio page ${event.data.current_page}/${event.data.total_pages}`,
+        status: 'generating_audio',
+        stage: {
+          name: 'Audio Generation',
+          detail: `${event.data.current_page}/${event.data.total_pages} pages`,
+          subProgress: Math.round((event.data.current_page / event.data.total_pages) * 100),
+        },
+        audioStats: {
+          generated: audioStats.generated,
+          failed: audioStats.failed,
+          skipped: audioStats.skipped,
+          currentDuration: audioStats.totalDuration,
+        },
       });
       break;
 
     case 'completed':
+      // Upload and audio generation complete
+      const totalDuration = event.data.total_duration || audioStats.totalDuration;
+      const durationStr = totalDuration > 0
+        ? `Total duration: ${Math.floor(totalDuration / 60)}m ${Math.round(totalDuration % 60)}s`
+        : '';
+
       callbacks.onProgress?.({
         currentPage: event.data.total_pages,
         totalPages: event.data.total_pages,
         progress: 100,
-        message: 'Upload completed successfully!',
+        message: `Upload complete! ${event.data.audio_generated || audioStats.generated} audio files generated. ${durationStr}`,
         status: 'completed',
+        stage: {
+          name: 'Completed',
+          detail: event.data.message,
+        },
+        audioStats: {
+          generated: event.data.audio_generated || audioStats.generated,
+          failed: event.data.audio_failed || audioStats.failed,
+          skipped: audioStats.skipped,
+          currentDuration: totalDuration,
+        },
       });
       callbacks.onCompleted?.(event.data);
       break;
 
     case 'error':
-      callbacks.onError?.(event.data.error || 'An error occurred during upload');
+      callbacks.onProgress?.({
+        currentPage: 0,
+        totalPages: 0,
+        progress: 0,
+        message: event.data.error || 'An error occurred',
+        status: 'error',
+        stage: {
+          name: 'Error',
+          detail: event.data.details || event.data.error,
+        },
+      });
+      callbacks.onError?.(event.data.error || event.data.details || 'An error occurred during upload');
       break;
 
     default:

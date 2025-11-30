@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosError } from 'axios';
 
-const BASE_URL = 'https://kiaatbse-backend.onrender.com';
+// API Base URL - uses environment variable or falls back to production
+export const BASE_URL = import.meta.env.VITE_API_URL || 'https://kiaatbse-backend.onrender.com';
 
 // Create axios instance
 const api: AxiosInstance = axios.create({
